@@ -15,10 +15,17 @@ try:
     from user_service.models.otp import get_verification_collection
 except ImportError:
     get_verification_collection = None
-try:
-    from user_service.services.mail_sender import mail_sender_service
-except ImportError:
-    mail_sender_service = None
+
+import httpx
+
+MAIL_SERVICE_URL = "http://localhost:8001/send-mail/"  # Adjust port as needed
+
+async def mail_sender_service(to, subject, text):
+    async with httpx.AsyncClient() as client:
+        payload = {"to": to, "subject": subject, "text": text}
+        response = await client.post(MAIL_SERVICE_URL, json=payload)
+        response.raise_for_status()
+        return response.json()
 try:
     from user_service.services.azure_blob import upload_to_blob_storage, delete_blob_from_url
 except ImportError:
@@ -109,7 +116,7 @@ async def login_user(user: UserLogin):
     if not db_user or not pwd_context.verify(user.password, db_user["password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     db_user["_id"] = str(db_user["_id"])
-    jwt_secret = config("JWT_SECRET", default="changeme")
+    jwt_secret = str(config("JWT_SECRET", default="changeme"))
     token = jwt.encode({"user_id": db_user["_id"]}, jwt_secret, algorithm="HS256")
     return {"user": db_user, "jwt": token, "message": "Login successful", "status": 200}
 
@@ -139,7 +146,7 @@ async def login_with_google(data):
         user = await users.find_one({"_id": result.inserted_id})
 
     user["_id"] = str(user["_id"])
-    jwt_secret = config("JWT_SECRET", default="changeme")
+    jwt_secret = str(config("JWT_SECRET", default="changeme"))
     token = jwt.encode({"user_id": user["_id"]}, jwt_secret, algorithm="HS256")
     return {
         "user": UserOut(**user).dict(by_alias=True),
@@ -149,7 +156,7 @@ async def login_with_google(data):
 
 async def admin_login(email: str, password: str):
     if email == "adminpdit26@gmail.com" and password == "Pdit@26":
-        jwt_secret = config("JWT_SECRET", default="changeme")
+        jwt_secret = str(config("JWT_SECRET", default="changeme"))
         token = jwt.encode({"role": "admin"}, jwt_secret, algorithm="HS256")
         return {"jwt": token, "role": "admin", "message": "Admin login successful"}
     raise HTTPException(status_code=401, detail="Invalid admin credentials")

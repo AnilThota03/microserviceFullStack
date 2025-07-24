@@ -3,29 +3,35 @@ from ..schemas.announcement_email import AnnouncementEmailModel
 from fastapi import HTTPException
 from datetime import datetime
 from pymongo.errors import DuplicateKeyError
-from ..services.mail_sender import mail_sender_service
-from bson import ObjectId
-from config import settings
+import httpx
+import os
 
-async def add_email_to_announcement_list(email: str, user_id: str = None):
+from typing import Optional
+
+async def add_email_to_announcement_list(email: str, user_id: Optional[str] = None):
     collection = get_announcement_email_collection()
     existing = await collection.find_one({"email": email})
     if existing:
         raise HTTPException(status_code=409, detail="Email already subscribed")
     data = AnnouncementEmailModel(
         email=email,
-        user_id=user_id,
+        userId=user_id,
         subscribed=True,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        createdAt=datetime.utcnow(),
+        updatedAt=datetime.utcnow(),
     ).dict(by_alias=True)
     try:
         await collection.insert_one(data)
-        await mail_sender_service(
-            to=email,
-            subject="Subscribed to PDIT Announcements",
-            text=f"You have successfully subscribed to PDIT Announcements. If you want to unsubscribe, please click this link: {settings.FRONTEND_URL}/unsubscribe/{email}",
-        )
+        # Send mail via mail microservice
+        MAIL_SERVICE_URL = os.getenv("MAIL_SERVICE_URL", "http://localhost:8001/send-mail/")
+        FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        async with httpx.AsyncClient() as client:
+            payload = {
+                "to": email,
+                "subject": "Subscribed to PDIT Announcements",
+                "text": f"You have successfully subscribed to PDIT Announcements. If you want to unsubscribe, please click this link: {FRONTEND_URL}/unsubscribe/{email}"
+            }
+            await client.post(MAIL_SERVICE_URL, json=payload)
     except DuplicateKeyError:
         raise HTTPException(status_code=409, detail="Email already exists")
     return {"message": "Email added to announcement list"}
@@ -43,10 +49,10 @@ async def get_emails_from_announcement_list():
     async for doc in collection.find({}):
         emails.append({
             "email": doc.get("email"),
-            "user_id": str(doc.get("user_id")) if doc.get("user_id") else None,
+            "user_id": str(doc.get("userId")) if doc.get("userId") else None,
             "subscribed": doc.get("subscribed", False),
-            "created_at": doc.get("created_at"),
-            "updated_at": doc.get("updated_at"),
+            "created_at": doc.get("createdAt"),
+            "updated_at": doc.get("updatedAt"),
             "id": str(doc.get("_id")),
         })
     return {"emails": emails}
