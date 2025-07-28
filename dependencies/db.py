@@ -3,7 +3,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from decouple import config
 import os
 
-MONGO_URL = config('MONGODB_URL', default='mongodb://localhost:27017/PDIT')
+MONGO_URL = str(os.getenv('MONGODB_URL') or config('MONGODB_URL', default='mongodb://localhost:27017/PDIT'))
 
 # Add this line to check
 print(f"Attempting to connect with URL: {MONGO_URL}") 

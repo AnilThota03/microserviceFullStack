@@ -1,4 +1,5 @@
 
+
 import random
 import string
 from datetime import datetime, timedelta
@@ -6,19 +7,18 @@ from fastapi import HTTPException
 from passlib.context import CryptContext
 from otp_service.models.otp import get_temp_user_collection, get_verification_collection
 from user_service.models.user import get_user_collection
-import httpx
+import os
+from decouple import config
 
+# Use the same password context as dependencies
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-OTP_EXPIRY_MINUTES = 5
 
-MAIL_SERVICE_URL = "http://localhost:8001/send-mail/"  # Adjust as needed
+# Configurable OTP expiry and mail service URL
+OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", config("OTP_EXPIRY_MINUTES", default=5)))
+MAIL_SERVICE_URL = str(os.getenv("MAIL_SERVICE_URL") or config("MAIL_SERVICE_URL", default="http://localhost:8001/send-mail/"))
 
-async def mail_sender_service(to, subject, text):
-    async with httpx.AsyncClient() as client:
-        payload = {"to": to, "subject": subject, "text": text}
-        response = await client.post(MAIL_SERVICE_URL, json=payload)
-        response.raise_for_status()
-        return response.json()
+# Dependency-style mail sender
+from dependencies.mail_service import send_mail as mail_sender_service
 
 async def send_otp(email: str) -> str:
     otp = ''.join(random.choices(string.digits, k=6))
@@ -33,7 +33,10 @@ async def send_otp(email: str) -> str:
     })
     subject = "Your OTP for PDIT Registration"
     text = f"Your OTP is: {otp}. It will expire in {OTP_EXPIRY_MINUTES} minutes."
-    await mail_sender_service(to=email, subject=subject, text=text)
+    try:
+        await mail_sender_service(to=email, subject=subject, text=text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send OTP email: {e}")
     return otp
 
 async def create_temp_user(user_data: dict):

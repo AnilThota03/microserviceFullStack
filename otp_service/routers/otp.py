@@ -1,11 +1,25 @@
-from fastapi import APIRouter, HTTPException, status
+
+from fastapi import APIRouter, HTTPException, status, Body
 from ..schemas.otp import OtpRequest, OtpVerify
-from ..services.otp import create_temp_user, verify_otp_and_register, resend_otp
+from ..services.otp import create_temp_user, verify_otp_and_register, resend_otp, mail_sender_service
 
 router = APIRouter(
     prefix="/api/otp",
     tags=["OTP Verification"]
 )
+
+@router.post("/test-mail", response_model=dict)
+async def test_mail_route(
+    to: str = Body(...),
+    subject: str = Body(default="Test Email from OTP Service"),
+    text: str = Body(default="This is a test email from the OTP microservice.")
+):
+    try:
+        result = await mail_sender_service(to=to, subject=subject, text=text)
+        return {"message": "Mail sent successfully.", "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Mail sending failed: {e}")
+
 
 @router.post("/send", response_model=dict)
 async def send_otp_route(request: OtpRequest):

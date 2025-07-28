@@ -4,22 +4,23 @@
 from fastapi import FastAPI, Request, Response
 import httpx
 import os
+from decouple import config
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="microBackend API Gateway")
 
 # Service route mapping (prefix: service_url)
 SERVICE_MAP = {
-    "/user": os.getenv("USER_SERVICE_URL", "http://localhost:8001"),
-    "/project": os.getenv("PROJECT_SERVICE_URL", "http://localhost:8002"),
-    "/support_ticket": os.getenv("SUPPORT_TICKET_SERVICE_URL", "http://localhost:8003"),
-    "/admin_reply": os.getenv("ADMIN_REPLY_SERVICE_URL", "http://localhost:8004"),
-    "/otp": os.getenv("OTP_SERVICE_URL", "http://localhost:8005"),
-    "/announcement": os.getenv("ANNOUNCEMENT_SERVICE_URL", "http://localhost:8006"),
-    "/announcement_email": os.getenv("ANNOUNCEMENT_EMAIL_SERVICE_URL", "http://localhost:8007"),
-    "/comparison-document": os.getenv("COMPARISON_DOCUMENT_SERVICE_URL", "http://localhost:8008"),
-    "/translation-document": os.getenv("TRANSLATION_DOCUMENT_SERVICE_URL", "http://localhost:8009"),
-    "/service_tool": os.getenv("SERVICE_TOOL_SERVICE_URL", "http://localhost:8010"),
+    "/user": os.getenv("USER_SERVICE_URL") or config("USER_SERVICE_URL", default="http://localhost:8001"),
+    "/project": os.getenv("PROJECT_SERVICE_URL") or config("PROJECT_SERVICE_URL", default="http://localhost:8002"),
+    "/support_ticket": os.getenv("SUPPORT_TICKET_SERVICE_URL") or config("SUPPORT_TICKET_SERVICE_URL", default="http://localhost:8003"),
+    "/admin_reply": os.getenv("ADMIN_REPLY_SERVICE_URL") or config("ADMIN_REPLY_SERVICE_URL", default="http://localhost:8004"),
+    "/otp": os.getenv("OTP_SERVICE_URL") or config("OTP_SERVICE_URL", default="http://localhost:8005"),
+    "/announcement": os.getenv("ANNOUNCEMENT_SERVICE_URL") or config("ANNOUNCEMENT_SERVICE_URL", default="http://localhost:8006"),
+    "/announcement_email": os.getenv("ANNOUNCEMENT_EMAIL_SERVICE_URL") or config("ANNOUNCEMENT_EMAIL_SERVICE_URL", default="http://localhost:8007"),
+    "/comparison-document": os.getenv("COMPARISON_DOCUMENT_SERVICE_URL") or config("COMPARISON_DOCUMENT_SERVICE_URL", default="http://localhost:8008"),
+    "/translation-document": os.getenv("TRANSLATION_DOCUMENT_SERVICE_URL") or config("TRANSLATION_DOCUMENT_SERVICE_URL", default="http://localhost:8009"),
+    "/service_tool": os.getenv("SERVICE_TOOL_SERVICE_URL") or config("SERVICE_TOOL_SERVICE_URL", default="http://localhost:8010"),
 }
 
 # CORS configuration
@@ -65,4 +66,5 @@ async def proxy(full_path: str, request: Request):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("gateway:app", host="0.0.0.0", port=int(os.getenv("API_GATEWAY_PORT", 8000)), reload=True)
+    port = int(os.getenv("API_GATEWAY_PORT") or config("API_GATEWAY_PORT", default=8000))
+    uvicorn.run("gateway:app", host="0.0.0.0", port=port, reload=True)

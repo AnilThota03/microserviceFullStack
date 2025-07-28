@@ -1,3 +1,87 @@
+# --- DELETE USER SERVICE ---
+async def delete_user(id: str):
+    users = get_user_collection()
+    result = await users.delete_one({"_id": ObjectId(id)})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"message": "User deleted successfully"}
+from user_service.models.user import get_user_collection
+from user_service.schemas.user import UserCreate, UserUpdate, UserOut, UserLogin
+
+from passlib.context import CryptContext
+from jose import jwt
+from bson import ObjectId
+from fastapi import HTTPException, UploadFile
+from datetime import datetime, timedelta
+import os
+from typing import Optional
+from decouple import config
+
+# --- LOGIN USER SERVICE ---
+async def login_user(user: UserLogin):
+    users = get_user_collection()
+    db_user = await users.find_one({"email": user.email})
+    if not db_user:
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    if not pwd_context.verify(user.password, db_user.get("password", "")):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    db_user["_id"] = str(db_user["_id"])
+    jwt_secret = os.getenv("JWT_SECRET", "changeme")
+    token = jwt.encode({"user_id": db_user["_id"]}, jwt_secret, algorithm="HS256")
+    return {"jwt": token, "user": UserOut(**db_user), "message": "Login successful"}
+
+# --- LOGIN WITH GOOGLE SERVICE ---
+async def login_with_google(data: dict):
+    users = get_user_collection()
+    email = data.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Email required for Google login")
+    user = await users.find_one({"email": email})
+    if not user:
+        user_doc = {
+            "email": email,
+            "firstName": data.get("given_name") or data.get("firstName", ""),
+            "lastName": data.get("family_name") or data.get("lastName", ""),
+            "picture": data.get("picture", "https://res.cloudinary.com/dizbakfcc/image/upload/v1751972291/profilePlaceholder_lcrcd0.png"),
+            "isVerified": True,
+            "role": "user",
+            "createdAt": datetime.utcnow(),
+            "updatedAt": datetime.utcnow(),
+            "contact": data.get("contact", "0000000000")
+        }
+        result = await users.insert_one(user_doc)
+        if not result.inserted_id:
+            raise HTTPException(status_code=500, detail="Failed to create user with Google login")
+        user = await users.find_one({"_id": result.inserted_id})
+    if not user:
+        raise HTTPException(status_code=500, detail="User not found after Google login")
+    user = dict(user)
+    user["_id"] = str(user["_id"])
+    jwt_secret = os.getenv("JWT_SECRET", "changeme")
+    token = jwt.encode({"user_id": user["_id"]}, jwt_secret, algorithm="HS256")
+    try:
+        user_out = UserOut(**user)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"UserOut serialization error: {e}")
+    return {"jwt": token, "user": user_out, "message": "Google login successful"}
+
+# Optional: import OTP, mail, and blob logic if available in microservice
+try:
+    from user_service.models.otp import get_verification_collection
+except ImportError:
+    get_verification_collection = None
+
+from dependencies.mail_service import send_mail as mail_sender_service
+try:
+    from dependencies.azure_blob_service import upload_to_blob_storage, delete_blob_from_url
+except ImportError:
+    upload_to_blob_storage = None
+    delete_blob_from_url = None
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+ 
 from user_service.models.user import get_user_collection
 from user_service.schemas.user import UserCreate, UserUpdate, UserOut, UserLogin
 
@@ -16,18 +100,9 @@ try:
 except ImportError:
     get_verification_collection = None
 
-import httpx
-
-MAIL_SERVICE_URL = "http://localhost:8001/send-mail/"  # Adjust port as needed
-
-async def mail_sender_service(to, subject, text):
-    async with httpx.AsyncClient() as client:
-        payload = {"to": to, "subject": subject, "text": text}
-        response = await client.post(MAIL_SERVICE_URL, json=payload)
-        response.raise_for_status()
-        return response.json()
+from dependencies.mail_service import send_mail as mail_sender_service
 try:
-    from user_service.services.azure_blob import upload_to_blob_storage, delete_blob_from_url
+    from dependencies.azure_blob_service import upload_to_blob_storage, delete_blob_from_url
 except ImportError:
     upload_to_blob_storage = None
     delete_blob_from_url = None
@@ -64,35 +139,42 @@ async def get_user_by_id(id: str):
 async def update_user(id: str, user: UserUpdate, file: Optional[UploadFile] = None):
     users = get_user_collection()
     update_data = {
-        k: v for k, v in user.dict(exclude_unset=True, exclude_none=True).items()
+        k: v for k, v in user.dict(exclude_unset=True, exclude_none=True, by_alias=True).items()
         if k != "password"
     }
     update_data["updatedAt"] = datetime.utcnow()
-    # Handle picture upload if file is present
+
+    # Efficient blob storage logic: only update picture if a new file is provided
     if file and file.filename and upload_to_blob_storage:
         try:
             ext = os.path.splitext(file.filename)[-1]
-            first_name = getattr(user, "first_name", None)
-            if not first_name or not isinstance(first_name, str):
-                first_name = "profile"
-            custom_blob_name = f"profiles/{first_name.strip().lower()}{ext}"
+            # Use firstName from update_data, fallback to DB value, fallback to 'profile'
+            first_name = update_data.get("firstName")
+            if not first_name:
+                existing_user = await users.find_one({"_id": ObjectId(id)})
+                first_name = existing_user.get("firstName") if existing_user else "profile"
+            custom_blob_name = f"profiles/{str(first_name).strip().lower()}{ext}"
+
             # Delete old picture if exists
             existing_user = await users.find_one({"_id": ObjectId(id)})
-            old_picture_url = existing_user.get("picture")
+            old_picture_url = existing_user.get("picture") if existing_user else None
             if old_picture_url and delete_blob_from_url:
                 try:
                     await delete_blob_from_url(old_picture_url)
                 except Exception:
                     pass
+
+            # Upload new picture
             blob_url = await upload_to_blob_storage(
                 "pdit",
-                file=file,
-                custom_name=custom_blob_name
+                file,
+                custom_blob_name
             )
             update_data["picture"] = blob_url
         except Exception as e:
             raise HTTPException(status_code=500, detail="Image upload failed")
 
+    # If no file, do not touch the picture field; previous image remains
     updated = await users.find_one_and_update(
         {"_id": ObjectId(id)},
         {"$set": update_data},
@@ -103,63 +185,14 @@ async def update_user(id: str, user: UserUpdate, file: Optional[UploadFile] = No
     updated["_id"] = str(updated["_id"])
     return UserOut(**updated)
 
-async def delete_user(id: str):
-    users = get_user_collection()
-    result = await users.delete_one({"_id": ObjectId(id)})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="User not found")
-    return {"message": "User deleted successfully"}
-
-async def login_user(user: UserLogin):
-    users = get_user_collection()
-    db_user = await users.find_one({"email": user.email})
-    if not db_user or not pwd_context.verify(user.password, db_user["password"]):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    db_user["_id"] = str(db_user["_id"])
-    jwt_secret = str(config("JWT_SECRET", default="changeme"))
-    token = jwt.encode({"user_id": db_user["_id"]}, jwt_secret, algorithm="HS256")
-    return {"user": db_user, "jwt": token, "message": "Login successful", "status": 200}
-
-async def login_with_google(data):
-    print("[SERVICE] login_with_google called")
-
-    print(" ❤️❤️",data)
-    users = get_user_collection()
-    email = data.get("email")
-    if not email:
-        raise HTTPException(status_code=400, detail="Email required for Google login")
-
-    user = await users.find_one({"email": email})
-    if not user:
-        user_doc = {
-            "email": email,
-            "firstName": data.get("given_name"),
-            "lastName": data.get("family_name"),
-            "picture": data.get("picture") or "https://res.cloudinary.com/dizbakfcc/image/upload/v1751972291/profilePlaceholder_lcrcd0.png",
-            "isVerified": True,
-            "role": "user",
-            "createdAt": datetime.utcnow(),
-            "updatedAt": datetime.utcnow(),
-            "contact": data.get("contact", "0000000000")
-        }
-        result = await users.insert_one(user_doc)
-        user = await users.find_one({"_id": result.inserted_id})
-
-    user["_id"] = str(user["_id"])
-    jwt_secret = str(config("JWT_SECRET", default="changeme"))
-    token = jwt.encode({"user_id": user["_id"]}, jwt_secret, algorithm="HS256")
-    return {
-        "user": UserOut(**user).dict(by_alias=True),
-        "jwt": token,
-        "message": "Google login successful"
-    }
 
 async def admin_login(email: str, password: str):
     if email == "adminpdit26@gmail.com" and password == "Pdit@26":
-        jwt_secret = str(config("JWT_SECRET", default="changeme"))
+        jwt_secret = os.getenv("JWT_SECRET", "changeme")
         token = jwt.encode({"role": "admin"}, jwt_secret, algorithm="HS256")
         return {"jwt": token, "role": "admin", "message": "Admin login successful"}
-    raise HTTPException(status_code=401, detail="Invalid admin credentials")
+    else:
+        raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
 async def email_verification_for_forgot_password(email: str):
     users = get_user_collection()

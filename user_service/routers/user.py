@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Optional
 from fastapi import (APIRouter, Body, Depends, File, Form, HTTPException, Path, UploadFile, status)
 from user_service.schemas.user import UserCreate, UserLogin, UserUpdate
@@ -20,12 +21,36 @@ async def create_user_route(user: UserCreate):
     logger.info(f"Successfully created user: {user.email}")
     return {"message": "User created successfully", "data": result}
 
+
+import httpx
+
 @router.post("/signup-email", response_model=dict)
 async def signup_email_route(user: UserCreate):
+    """
+    Handles user signup by email. Calls OTP microservice to create temp user and send OTP for verification.
+    """
     logger.info(f"Received email signup request for: {user.email}")
-    # If you have a temp user creation service, call it here
-    # await create_temp_user(user.model_dump(by_alias=True))
-    return {"message": "OTP sent to your email. Please verify to complete registration."}
+    if not user.email:
+        logger.error("Signup-email failed: Email is required.")
+        raise HTTPException(status_code=400, detail="Email is required.")
+    # Call OTP microservice to create temp user and send OTP
+    otp_service_url = os.getenv("OTP_SERVICE_URL", "http://localhost:8002/api/otp/send")
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(otp_service_url, json=user.model_dump(by_alias=True))
+            response.raise_for_status()
+            data = response.json()
+        logger.info(f"OTP sent to new user email: {user.email}")
+        return {"message": data.get("message", "OTP sent to your email. Please verify to complete registration.")}
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 409:
+            logger.warning(f"Signup attempt for existing user: {user.email}")
+            raise HTTPException(status_code=409, detail="Email already registered. Please login or use forgot password.")
+        logger.error(f"Error during signup-email: {e.response.text}")
+        raise HTTPException(status_code=500, detail=f"OTP service error: {e.response.text}")
+    except Exception as e:
+        logger.error(f"Unexpected error during signup-email: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send OTP for signup.")
 
 @router.get("/user/{id}", response_model=dict)
 async def get_user_route(id: str):
@@ -43,13 +68,22 @@ async def update_user_route(
     email: Optional[str] = Form(None)
 ):
     logger.info(f"Updating user with ID: {id}. File included: {'Yes' if file else 'No'}")
-    user_data = UserUpdate(
-        firstName=firstName,
-        lastName=lastName,
-        contact=contact,
-        email=email
-    )
-    result = await update_user(id, user_data, file)
+    # Only update fields that are not None and not blank/empty string
+    update_fields = {}
+    if firstName is not None and firstName.strip() != "":
+        update_fields["firstName"] = firstName.strip()
+    if lastName is not None and lastName.strip() != "":
+        update_fields["lastName"] = lastName.strip()
+    if contact is not None and contact.strip() != "":
+        update_fields["contact"] = contact.strip()
+    if email is not None and email.strip() != "":
+        update_fields["email"] = email.strip()
+
+    # Build UserUpdate with only valid fields
+    user_data = UserUpdate(**update_fields)
+
+    # Only update picture if a file is provided; if not, previous image remains unchanged
+    result = await update_user(id, user_data, file if file and file.filename else None)
     logger.info(f"Successfully updated user: {id}")
     return {"message": "User updated successfully", "data": result}
 
@@ -110,7 +144,10 @@ async def change_password_route(
     if not all([current_password, new_password, confirm_password]):
         logger.error(f"Change password failed for user {user_id}: Missing fields.")
         raise HTTPException(status_code=400, detail="All fields are required")
+    if not isinstance(current_password, str) or not isinstance(new_password, str):
+        logger.error(f"Change password failed for user {user_id}: Invalid password types.")
+        raise HTTPException(status_code=400, detail="Invalid password format.")
     if new_password != confirm_password:
         logger.error(f"Change password failed for user {user_id}: Passwords do not match.")
         raise HTTPException(status_code=400, detail="Passwords do not match")
-    return await change_password(user_id, current_password, new_password)
+    return await change_password(user_id, str(current_password), str(new_password))
