@@ -2,7 +2,7 @@
 
 import logging
 from fastapi import APIRouter, HTTPException, status, Body
-from ..schemas.otp import OtpRequest, OtpVerify
+from ..schemas.otp import OtpRequest, OtpVerify, TempUser
 from ..services.otp import create_temp_user, verify_otp_and_register, resend_otp, mail_sender_service
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ async def test_mail_route(
 
 
 @router.post("/send", response_model=dict)
-async def send_otp_route(request: OtpRequest):
+async def send_otp_route(request: TempUser):
     logger.debug(f"[send_otp_route] Called with email={request.email}")
     try:
         await create_temp_user(request.model_dump())

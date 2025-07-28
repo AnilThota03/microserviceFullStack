@@ -1,3 +1,49 @@
+# --- LOGIN USER SERVICE ---
+from jose import jwt
+from passlib.context import CryptContext
+from fastapi import HTTPException
+from user_service.models.user import get_user_collection
+from user_service.schemas.user import UserLogin
+import os
+class Settings:
+    JWT_SECRET = os.getenv("JWT_SECRET", "changeme")
+settings = Settings()
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+async def login_user(user: UserLogin):
+    users = get_user_collection()
+    db_user = await users.find_one({"email": user.email})
+    if not db_user or not pwd_context.verify(user.password, db_user["password"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    db_user["_id"] = str(db_user["_id"])
+    token = jwt.encode({"user_id": db_user["_id"]}, settings.JWT_SECRET, algorithm="HS256")
+    return {"user": db_user, "jwt": token, "message": "Login successful", "status": 200}
+
+# --- CLEANED IMPORTS ---
+from user_service.models.user import get_user_collection
+from user_service.schemas.user import UserCreate, UserUpdate, UserOut, UserLogin
+from passlib.context import CryptContext
+from jose import jwt
+from bson import ObjectId
+from fastapi import HTTPException, UploadFile
+from datetime import datetime, timedelta
+import os
+from typing import Optional
+from decouple import config
+import httpx
+try:
+    from user_service.models.otp import get_verification_collection
+except ImportError:
+    get_verification_collection = None
+from dependencies.mail_service import send_mail as mail_sender_service
+try:
+    from dependencies.azure_blob_service import upload_to_blob_storage, delete_blob_from_url
+except ImportError:
+    upload_to_blob_storage = None
+    delete_blob_from_url = None
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 # --- DELETE USER SERVICE ---
 async def delete_user(id: str):
     users = get_user_collection()
@@ -5,105 +51,6 @@ async def delete_user(id: str):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "User deleted successfully"}
-from user_service.models.user import get_user_collection
-from user_service.schemas.user import UserCreate, UserUpdate, UserOut, UserLogin
-
-from passlib.context import CryptContext
-from jose import jwt
-from bson import ObjectId
-from fastapi import HTTPException, UploadFile
-from datetime import datetime, timedelta
-import os
-from typing import Optional
-from decouple import config
-
-# --- LOGIN USER SERVICE ---
-async def login_user(user: UserLogin):
-    users = get_user_collection()
-    db_user = await users.find_one({"email": user.email})
-    if not db_user:
-        raise HTTPException(status_code=401, detail="Incorrect email or password")
-    if not pwd_context.verify(user.password, db_user.get("password", "")):
-        raise HTTPException(status_code=401, detail="Incorrect email or password")
-    db_user["_id"] = str(db_user["_id"])
-    jwt_secret = os.getenv("JWT_SECRET", "changeme")
-    token = jwt.encode({"user_id": db_user["_id"]}, jwt_secret, algorithm="HS256")
-    return {"jwt": token, "user": UserOut(**db_user), "message": "Login successful"}
-
-# --- LOGIN WITH GOOGLE SERVICE ---
-async def login_with_google(data: dict):
-    users = get_user_collection()
-    email = data.get("email")
-    if not email:
-        raise HTTPException(status_code=400, detail="Email required for Google login")
-    user = await users.find_one({"email": email})
-    if not user:
-        user_doc = {
-            "email": email,
-            "firstName": data.get("given_name") or data.get("firstName", ""),
-            "lastName": data.get("family_name") or data.get("lastName", ""),
-            "picture": data.get("picture", "https://res.cloudinary.com/dizbakfcc/image/upload/v1751972291/profilePlaceholder_lcrcd0.png"),
-            "isVerified": True,
-            "role": "user",
-            "createdAt": datetime.utcnow(),
-            "updatedAt": datetime.utcnow(),
-            "contact": data.get("contact", "0000000000")
-        }
-        result = await users.insert_one(user_doc)
-        if not result.inserted_id:
-            raise HTTPException(status_code=500, detail="Failed to create user with Google login")
-        user = await users.find_one({"_id": result.inserted_id})
-    if not user:
-        raise HTTPException(status_code=500, detail="User not found after Google login")
-    user = dict(user)
-    user["_id"] = str(user["_id"])
-    jwt_secret = os.getenv("JWT_SECRET", "changeme")
-    token = jwt.encode({"user_id": user["_id"]}, jwt_secret, algorithm="HS256")
-    try:
-        user_out = UserOut(**user)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"UserOut serialization error: {e}")
-    return {"jwt": token, "user": user_out, "message": "Google login successful"}
-
-
-# Remove local OTP logic; use OTP microservice for all OTP actions
-from dependencies.mail_service import send_mail as mail_sender_service
-try:
-    from dependencies.azure_blob_service import upload_to_blob_storage, delete_blob_from_url
-except ImportError:
-    upload_to_blob_storage = None
-    delete_blob_from_url = None
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
- 
-from user_service.models.user import get_user_collection
-from user_service.schemas.user import UserCreate, UserUpdate, UserOut, UserLogin
-
-from passlib.context import CryptContext
-from jose import jwt
-from bson import ObjectId
-from fastapi import HTTPException, UploadFile
-from datetime import datetime, timedelta
-import os
-from typing import Optional
-from decouple import config
-
-# Optional: import OTP, mail, and blob logic if available in microservice
-try:
-    from user_service.models.otp import get_verification_collection
-except ImportError:
-    get_verification_collection = None
-
-from dependencies.mail_service import send_mail as mail_sender_service
-try:
-    from dependencies.azure_blob_service import upload_to_blob_storage, delete_blob_from_url
-except ImportError:
-    upload_to_blob_storage = None
-    delete_blob_from_url = None
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 async def create_user(user: UserCreate):
     users = get_user_collection()
@@ -190,7 +137,6 @@ async def admin_login(email: str, password: str):
     else:
         raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
-import httpx
 async def email_verification_for_forgot_password(email: str):
     users = get_user_collection()
     if not await users.find_one({"email": email}):

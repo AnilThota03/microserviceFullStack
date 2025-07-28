@@ -1,10 +1,12 @@
+
+# All imports at the top
 import httpx
 import logging
 import os
 from typing import Optional
 from fastapi import (APIRouter, Body, Depends, File, Form, HTTPException, Path, UploadFile, status)
 from user_service.schemas.user import UserCreate, UserLogin, UserUpdate
-from user_service.services.user import (change_password, create_user, delete_user, email_verification_for_forgot_password, get_user_by_id, login_user, login_with_google, reset_password, update_user, admin_login)
+from user_service.services.user import change_password, create_user, delete_user, email_verification_for_forgot_password, get_user_by_id    , reset_password, update_user, admin_login
 # If you have authentication dependencies, import or stub them here
 # from ..dependencies.auth import get_current_user, require_admin
 
@@ -55,31 +57,7 @@ async def resend_otp_route(email: str = Body(...)):
     except Exception as e:
         logger.error(f"[resend_otp_route] Unexpected error for email={email}: {e}")
         raise HTTPException(status_code=500, detail="Failed to resend OTP.")
-import logging
-import os
-from typing import Optional
-from fastapi import (APIRouter, Body, Depends, File, Form, HTTPException, Path, UploadFile, status)
-from user_service.schemas.user import UserCreate, UserLogin, UserUpdate
-from user_service.services.user import (change_password, create_user, delete_user, email_verification_for_forgot_password, get_user_by_id, login_user, login_with_google, reset_password, update_user, admin_login)
-# If you have authentication dependencies, import or stub them here
-# from ..dependencies.auth import get_current_user, require_admin
 
-logger = logging.getLogger(__name__)
-
-router = APIRouter(
-    prefix="/user/api",
-    tags=["User"]
-)
-
-@router.post("/", response_model=dict)
-async def create_user_route(user: UserCreate):
-    logger.info(f"Attempting to create a new user with email: {user.email}")
-    result = await create_user(user)
-    logger.info(f"Successfully created user: {user.email}")
-    return {"message": "User created successfully", "data": result}
-
-
-import httpx
 
 @router.post("/signup-email", response_model=dict)
 async def signup_email_route(user: UserCreate):
@@ -88,9 +66,12 @@ async def signup_email_route(user: UserCreate):
         logger.error("[signup_email_route] Signup-email failed: Email is required.")
         raise HTTPException(status_code=400, detail="Email is required.")
     otp_service_url = os.getenv("OTP_SERVICE_URL", "http://localhost:8005/api/otp/send")
+    # Send all user registration fields to OTP service for temp user creation
+    otp_payload = user.model_dump(by_alias=True)
+    print(otp_payload)
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(otp_service_url, json=user.model_dump(by_alias=True))
+            response = await client.post(otp_service_url, json=otp_payload)
             response.raise_for_status()
             data = response.json()
         logger.info(f"[signup_email_route] OTP sent successfully to {user.email}")
@@ -101,7 +82,7 @@ async def signup_email_route(user: UserCreate):
             logger.warning(f"[signup_email_route] Signup attempt for existing user: {user.email}")
             raise HTTPException(status_code=409, detail="Email already registered. Please login or use forgot password.")
         logger.error(f"[signup_email_route] Error for {user.email}: {e.response.text}")
-        raise HTTPException(status_code=500, detail=f"OTP service error: {e.response.text}")
+        raise HTTPException(status_code=500, detail=f"OTP service error: {e.response.text} {e} {e.response}")
     except Exception as e:
         logger.error(f"[signup_email_route] Unexpected error for {user.email}: {e}")
         raise HTTPException(status_code=500, detail="Failed to send OTP for signup.")
@@ -154,6 +135,7 @@ async def delete_user_by_admin_route(id: str):
 @router.post("/user/login", response_model=dict)
 async def login_route(user: UserLogin):
     logger.debug(f"[login_route] Called with user={user}")
+    from user_service.services.user import login_user
     result = await login_user(user)
     logger.debug(f"[login_route] Result: {result}")
     return result
@@ -161,9 +143,11 @@ async def login_route(user: UserLogin):
 @router.post("/userLoginWithGoogle", response_model=dict)
 async def login_with_google_route(data: dict = Body(...)):
     logger.debug(f"[login_with_google_route] Called with data={data}")
-    result = await login_with_google(data["data"])
-    logger.debug(f"[login_with_google_route] Result: {result}")
-    return result
+    # login_with_google is not implemented in services, so raise error or comment out
+    raise NotImplementedError("login_with_google is not implemented.")
+    # result = await login_with_google(data["data"])
+    # logger.debug(f"[login_with_google_route] Result: {result}")
+    # return result
 
 @router.post("/admin/login", response_model=dict)
 async def admin_login_route(email: str = Body(...), password: str = Body(...)):
