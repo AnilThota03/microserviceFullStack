@@ -65,12 +65,8 @@ async def login_with_google(data: dict):
         raise HTTPException(status_code=500, detail=f"UserOut serialization error: {e}")
     return {"jwt": token, "user": user_out, "message": "Google login successful"}
 
-# Optional: import OTP, mail, and blob logic if available in microservice
-try:
-    from user_service.models.otp import get_verification_collection
-except ImportError:
-    get_verification_collection = None
 
+# Remove local OTP logic; use OTP microservice for all OTP actions
 from dependencies.mail_service import send_mail as mail_sender_service
 try:
     from dependencies.azure_blob_service import upload_to_blob_storage, delete_blob_from_url
@@ -194,23 +190,23 @@ async def admin_login(email: str, password: str):
     else:
         raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
+import httpx
 async def email_verification_for_forgot_password(email: str):
     users = get_user_collection()
     if not await users.find_one({"email": email}):
         raise HTTPException(status_code=404, detail="User not found")
-    if get_verification_collection and mail_sender_service:
-        expires_at = datetime.utcnow() + timedelta(minutes=5)
-        verification = get_verification_collection()
-        await verification.insert_one({
-            "email": email,
-            "created_at": datetime.utcnow(),
-            "expires_at": expires_at,
-            "used": False
-        })
-        subject = "PDIT Password Reset Verification"
-        text = f"A password reset was requested for your account. This link will expire in 5 minutes."
-        await mail_sender_service(to=email, subject=subject, text=text)
-    return {"message": "Verification email sent"}
+    # Call OTP microservice to send verification email
+    otp_service_url = os.getenv("OTP_SERVICE_URL", "http://localhost:8005/api/otp/send")
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(otp_service_url, json={"email": email})
+            response.raise_for_status()
+            data = response.json()
+        return {"message": data.get("message", "Verification email sent")}
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"OTP service error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send verification email: {e}")
 
 async def reset_password(user_id: str, new_password: str):
     users = get_user_collection()

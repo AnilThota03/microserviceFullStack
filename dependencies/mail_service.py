@@ -34,7 +34,7 @@ async def send_mail(
         await aiosmtplib.send(
             msg,
             hostname=SMTP_HOST,
-            port=465,
+            port=SMTP_PORT,
             username=EMAIL_USER,
             password=EMAIL_PASSWORD,
             use_tls=True,

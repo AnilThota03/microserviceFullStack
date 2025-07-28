@@ -27,41 +27,64 @@ async def create(
     type: str = Form(...),
     model: str = Form(None)
 ):
-    logger.info(f"Request to create comparison document '{name}' for project '{project_id}' by user '{user_id}'.")
-    result = await create_comparison_document_with_files(
-        name=name,
-        original_file=original_file,
-        modified_file=modified_file,
-        project_id=project_id,
-        user_id=user_id,
-        type=type,
-        model=model
-    )
-    logger.info(f"Successfully created comparison document with ID: {result.id}")
-    return result
+    logger.debug(f"[create] Called with name={name}, project_id={project_id}, user_id={user_id}, type={type}, model={model}")
+    try:
+        result = await create_comparison_document_with_files(
+            name=name,
+            original_file=original_file,
+            modified_file=modified_file,
+            project_id=project_id,
+            user_id=user_id,
+            type=type,
+            model=model
+        )
+        logger.info(f"[create] Successfully created comparison document with ID: {getattr(result, 'id', 'N/A')}")
+        return result
+    except Exception as e:
+        logger.error(f"[create] Failed to create comparison document '{name}': {e}")
+        raise
 
 @router.get("/{document_id}", response_model=ComparisonDocumentOut)
 async def get_by_id(document_id: str):
-    logger.info(f"Fetching comparison document with ID: {document_id}")
-    return await get_comparison_document_by_id(document_id)
+    logger.debug(f"[get_by_id] Called with document_id={document_id}")
+    try:
+        result = await get_comparison_document_by_id(document_id)
+        logger.info(f"[get_by_id] Fetched comparison document with ID: {document_id}")
+        return result
+    except Exception as e:
+        logger.error(f"[get_by_id] Failed to fetch document_id={document_id}: {e}")
+        raise
 
 @router.get("/project/{project_id}", response_model=ComparisonDocumentListOut)
 async def get_by_project(project_id: str):
-    logger.info(f"Fetching all comparison documents for project ID: {project_id}")
-    documents = await get_comparison_documents_by_project_id(project_id)
-    logger.info(f"Found {len(documents)} documents for project ID: {project_id}")
-    return {"message": "Documents fetched successfully", "data": documents}
+    logger.debug(f"[get_by_project] Called with project_id={project_id}")
+    try:
+        documents = await get_comparison_documents_by_project_id(project_id)
+        logger.info(f"[get_by_project] Found {len(documents)} documents for project ID: {project_id}")
+        return {"message": "Documents fetched successfully", "data": documents}
+    except Exception as e:
+        logger.error(f"[get_by_project] Failed for project_id={project_id}: {e}")
+        raise
 
 @router.put("/{document_id}", response_model=ComparisonDocumentOut)
 async def update(document_id: str, data: ComparisonDocumentUpdate):
-    logger.info(f"Updating comparison document with ID: {document_id}")
-    updated_document = await update_comparison_document(document_id, data)
-    logger.info(f"Successfully updated document with ID: {document_id}")
-    return updated_document
+    logger.debug(f"[update] Called with document_id={document_id}, data={data}")
+    try:
+        updated_document = await update_comparison_document(document_id, data)
+        logger.info(f"[update] Successfully updated document with ID: {document_id}")
+        return updated_document
+    except Exception as e:
+        logger.error(f"[update] Failed to update document_id={document_id}: {e}")
+        raise
 
 @router.delete("/{document_id}")
 async def delete(document_id: str):
-    logger.warning(f"Request to delete comparison document with ID: {document_id}")
-    result = await delete_comparison_document(document_id)
-    logger.info(f"Successfully deleted document with ID: {document_id}")
-    return result
+    logger.debug(f"[delete] Called with document_id={document_id}")
+    try:
+        logger.warning(f"[delete] Request to delete comparison document with ID: {document_id}")
+        result = await delete_comparison_document(document_id)
+        logger.info(f"[delete] Successfully deleted document with ID: {document_id}")
+        return result
+    except Exception as e:
+        logger.error(f"[delete] Failed to delete document_id={document_id}: {e}")
+        raise
