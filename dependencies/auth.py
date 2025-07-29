@@ -3,7 +3,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 import os
 
-JWT_SECRET = os.getenv("JWT_SECRET", "your-secret-key")
+from decouple import config
+JWT_SECRET = str(os.getenv("JWT_SECRET") or config("JWT_SECRET", default="your-secret-key"))
 
 auth_scheme = HTTPBearer(auto_error=False)
 

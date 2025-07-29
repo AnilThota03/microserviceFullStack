@@ -10,8 +10,8 @@ from azure.storage.blob.aio import BlobServiceClient
 from decouple import config
 from fastapi import UploadFile
 
-AZURE_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "pdit")
-blob_service_client = BlobServiceClient.from_connection_string(config("AZURE_STORAGE_CONNECTION_STRING")) 
+AZURE_CONTAINER = str(os.getenv("AZURE_BLOB_CONTAINER") or config("AZURE_BLOB_CONTAINER", default="pdit"))
+blob_service_client = BlobServiceClient.from_connection_string(str(os.getenv("AZURE_STORAGE_CONNECTION_STRING") or config("AZURE_STORAGE_CONNECTION_STRING")))
 
 
 def generate_blob_name(folder: str, original_filename: str, custom_name: str = None) -> str:

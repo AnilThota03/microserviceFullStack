@@ -1,7 +1,9 @@
+
+from dependencies.db import db
+
 def get_temp_user_collection():
-    # Replace with actual db connection logic
-    return None
+    return db["temp_users"]
+
 
 def get_verification_collection():
-    # Replace with actual db connection logic
-    return None
+    return db["verifications"]

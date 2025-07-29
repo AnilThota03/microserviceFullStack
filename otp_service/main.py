@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from routers import otp
+from otp_service.routers import otp
 
 app = FastAPI(title="OTP Service")
 app.include_router(otp.router)

@@ -1,1 +1,8 @@
-# ...existing code from Backend/app/schemas/service_tool.py will be migrated here...
+from pydantic import BaseModel
+
+class ServiceToolSchema(BaseModel):
+    _id: str  # fixed values like "translation", "comparison", "annotation"
+    name: str
+
+    class Config:
+        orm_mode = True

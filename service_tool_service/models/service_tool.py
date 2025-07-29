@@ -1,1 +1,4 @@
-# ...existing code from Backend/app/models/service_tool.py will be migrated here...
+from microserviceFullStack.dependencies.db import db
+
+def get_service_tool_collection():
+    return db["service_tools"]
